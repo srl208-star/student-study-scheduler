@@ -29,6 +29,19 @@ def reset_all_data():
     st.session_state.availability = []
     st.session_state.schedule = pd.DataFrame()
 
+def delete_task(task_index):
+    if 0 <= task_index < len(st.session_state.tasks):
+        deleted_task = st.session_state.tasks.pop(task_index)
+
+        # Also remove scheduled blocks tied to this task
+        if not st.session_state.schedule.empty:
+            st.session_state.schedule = st.session_state.schedule[
+                ~(
+                    (st.session_state.schedule["Task"] == deleted_task["Task"]) &
+                    (st.session_state.schedule["Course"] == deleted_task["Course"])
+                )
+            ].reset_index(drop=True)
+
 def get_course_colors(courses):
     palette = [
         "#2563EB", "#DC2626", "#16A34A", "#CA8A04",
@@ -149,12 +162,27 @@ with st.form("task_form"):
             st.warning("Please enter both a task and a course.")
 
 # -----------------------------
-# SHOW TASKS
+# SHOW TASKS + DELETE TASKS
 # -----------------------------
 if st.session_state.tasks:
     st.subheader("Current Tasks")
+
     task_df = pd.DataFrame(st.session_state.tasks)
     st.dataframe(task_df, use_container_width=True)
+
+    st.markdown("#### Delete a Task")
+    for i, task_row in enumerate(st.session_state.tasks):
+        col1, col2 = st.columns([6, 1])
+        with col1:
+            st.write(
+                f"**{task_row['Task']}** ({task_row['Course']}) "
+                f"| Due: {task_row['Due Date']} "
+                f"| Hours: {task_row['Hours']}"
+            )
+        with col2:
+            if st.button("Delete", key=f"delete_task_{i}"):
+                delete_task(i)
+                st.rerun()
 
 # -----------------------------
 # ADD AVAILABILITY
@@ -262,7 +290,7 @@ if st.button("Generate Schedule"):
             st.success("Schedule generated.")
 
 # -----------------------------
-# DISPLAY CALENDAR
+# DISPLAY CALENDAR / AGENDA
 # -----------------------------
 if not st.session_state.schedule.empty:
     st.subheader("Study Calendar")
@@ -302,17 +330,44 @@ if not st.session_state.schedule.empty:
                             key=f"status_{i}"
                         )
                         st.session_state.schedule.at[i, "Status"] = new_status
-    else:
-        for date, group in sched.groupby("Date"):
-            st.markdown(f"### {date}")
-            for i, row in group.iterrows():
-                color = colors.get(str(row["Course"]).strip(), "#4B5563")
-                st.markdown(render_card(row, color), unsafe_allow_html=True)
 
-                new_status = st.selectbox(
-                    f"Status for {row['Task']} ({row['Start']})",
-                    ["Not Started", "In Progress", "Completed"],
-                    index=["Not Started", "In Progress", "Completed"].index(row["Status"]),
-                    key=f"agenda_status_{i}"
-                )
-                st.session_state.schedule.at[i, "Status"] = new_status
+    else:
+        incomplete_df = sched[sched["Status"] != "Completed"].copy()
+        completed_df = sched[sched["Status"] == "Completed"].copy()
+
+        st.markdown("## To Do")
+        if incomplete_df.empty:
+            st.success("No incomplete study sessions.")
+        else:
+            for date, group in incomplete_df.groupby("Date"):
+                st.markdown(f"### {date}")
+                for i, row in group.iterrows():
+                    color = colors.get(str(row["Course"]).strip(), "#4B5563")
+                    st.markdown(render_card(row, color), unsafe_allow_html=True)
+
+                    new_status = st.selectbox(
+                        f"Status for {row['Task']} ({row['Start']})",
+                        ["Not Started", "In Progress", "Completed"],
+                        index=["Not Started", "In Progress", "Completed"].index(row["Status"]),
+                        key=f"agenda_todo_status_{i}"
+                    )
+                    st.session_state.schedule.at[i, "Status"] = new_status
+
+        st.markdown("---")
+        st.markdown("## Completed")
+        if completed_df.empty:
+            st.info("No completed study sessions yet.")
+        else:
+            for date, group in completed_df.groupby("Date"):
+                st.markdown(f"### {date}")
+                for i, row in group.iterrows():
+                    color = colors.get(str(row["Course"]).strip(), "#4B5563")
+                    st.markdown(render_card(row, color), unsafe_allow_html=True)
+
+                    new_status = st.selectbox(
+                        f"Completed status for {row['Task']} ({row['Start']})",
+                        ["Not Started", "In Progress", "Completed"],
+                        index=["Not Started", "In Progress", "Completed"].index(row["Status"]),
+                        key=f"agenda_completed_status_{i}"
+                    )
+                    st.session_state.schedule.at[i, "Status"] = new_status
